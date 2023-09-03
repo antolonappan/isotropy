@@ -202,7 +202,7 @@ class ResidualComp:
     
     def plot(self):
         for model in self.models:
-            plt.plot(self.results[model].mean(axis=0),label=model)
+            plt.plot(self.results[model].mean(axis=0)[1:],label=model)
         plt.legend()
         plt.title(f'{self.method} bootstraping')
         plt.semilogy()
