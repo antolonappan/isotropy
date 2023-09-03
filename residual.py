@@ -13,7 +13,24 @@ from marcia import database
 from marcia import Cosmology
 
 class ResidualStat:
+    """
+    ResidualStat is a class that computes the residuals of a cosmological model fit
+    to supernova data. It takes as input the cosmological model, its parameters,
+    the chain file containing the MCMC samples, and the supernova data. 
+    It provides methods to plot the positions of the supernovae in galactic coordinates, 
+    compute the residuals, and plot the residual histogram. It also provides methods
+    to compute the angular power spectrum of the residuals using different bootstraping methods.
+
+    Attributes:
+    ----------
+    model: str - cosmological model
+    parameters: dict - cosmological parameters
+    chainfile: str - path to the chain file
+    data: str - data to use
+    """
+
     def __init__(self, model,parameters,chainfile,data='Pantheon_plus'):
+
         self.model = Cosmology(model,parameters)
         self.sample = emcee.backends.HDFBackend(chainfile)
         self.samples = self.sample.get_chain(discard=50, flat=True)
@@ -30,9 +47,15 @@ class ResidualStat:
     
     @property
     def resolution(self):
+        """
+        Returns the resolution of the map in degrees
+        """
         return hp.nside2resol(NSIDE, arcmin=True) / 60 
         
     def plot_SN(self):
+        """
+        Plots the positions of the supernovae in galactic coordinates
+        """
         c = SkyCoord(ra = self.ra*u.degree,dec = self.dec*u.degree,frame = 'icrs')
 
         ra_rad = c.ra.radian
@@ -51,18 +74,34 @@ class ResidualStat:
         plt.title("SN Ia Positions in galactic Coordinates", y=1.08)
     
     def get_m(self):
+        """
+        Returns the pixel index of the supernovae
+        """
         m = hp.ang2pix(nside=self.NSIDE,phi=self.dec ,theta=self.ra, lonlat=True)
         return m.tolist()
     
     def get_mask(self):
+        """
+        Returns the mask and the index of the supernovae
+        """
         arr = np.array([0.]*self.npix)
         index = np.array([0.]*self.npix)
         return arr,index
 
     def get_residual(self,theory):
+        """
+        Returns the residual of the fit
+
+        Parameters:
+        ----------
+        theory: array - array of the distance modulus of the supernovae
+        """
         return (self.mbs - theory)/self.mbs_err
     
     def plot_residual_hist(self,param=None):
+        """
+        Plots the residual histogram
+        """
         if param is None:
             param = self.sample_median
         theory = self.get_theory(param)
@@ -75,6 +114,14 @@ class ResidualStat:
 
     
     def get_residual_arr_ind(self,theory,bootstrap=False):
+        """
+        Returns the residual array and index
+
+        Parameters:
+        ----------
+        theory: array - array of the distance modulus of the supernovae
+        bootstrap: bool - if True, the residual array is shuffled
+        """
         m = self.get_m()
         arr_,ind_ = self.get_mask()
         arr = arr_.copy()
@@ -88,12 +135,27 @@ class ResidualStat:
         return arr,ind
     
     def get_theory(self,param=None):
+        """
+        Returns the distance modulus of the supernovae
+
+        Parameters:
+        ----------
+        param: List - cosmological parameters
+        """
         if param is None:
             param = self.sample_median
         theory = self.model.distance_modulus(param, self.zcmb, self.zhel)
         return theory
     
     def get_residual_map(self,param=None,bootstrap=False):
+        """
+        Returns the residual map
+
+        Parameters:
+        ----------
+        param: List - cosmological parameters
+        bootstrap: bool - if True, the residual array is shuffled
+        """
         if param is None:
             param = self.sample_median
         theory = self.get_theory(param)
@@ -105,6 +167,14 @@ class ResidualStat:
         return arri
     
     def get_residual_cls(self,param=None,bootstrap=False):
+        """
+        Returns the residual angular power spectrum
+        
+        Parameters:
+        ----------
+        param: List - cosmological parameters
+        bootstrap: bool - if True, the residual array is shuffled
+        """
         if param is None:
             param = self.sample_median
         sn_map = self.get_residual_map(param,bootstrap=bootstrap)
@@ -113,6 +183,13 @@ class ResidualStat:
         return cl
 
     def random_nsamples(self, n):
+        """
+        Returns n random samples from the chain
+
+        Parameters:
+        ----------
+        n: int - number of samples
+        """
         samples = self.samples.copy()
         np.random.shuffle(samples)
         
@@ -129,12 +206,27 @@ class ResidualStat:
                 break
     
     def get_residual_cls_bootstrap(self,nsamples):
+        """
+        Performs bootstraping on the residual angular power spectrum
+
+        Parameters:
+        ----------
+        nsamples: int - number of samples
+        """
         cls = []
         for i in range(nsamples):
             cls.append(self.get_residual_cls(bootstrap=True))
         return np.array(cls).mean(axis=0)
     
     def bootstrap_position(self,mc_nsamples,b_nsamples):
+        """
+        Returns the residual angular power spectrum using bootstraping on the position of the supernovae
+
+        Parameters:
+        ----------
+        mc_nsamples: int - number of Monte Carlo samples
+        b_nsamples: int - number of bootstrap samples
+        """
         n = len(self.samples)
         assert mc_nsamples < n, "mc_nsamples must be less than the number of samples"
         cls = []
@@ -143,6 +235,14 @@ class ResidualStat:
         return np.array(cls)
     
     def bootstrap_pixel(self,mc_nsamples,b_nsamples):
+        """
+        Returns the residual angular power spectrum using bootstraping on the pixel of the supernovae
+
+        Parameters:
+        ----------
+        mc_nsamples: int - number of Monte Carlo samples
+        b_nsamples: int - number of bootstrap samples
+        """
         n = len(self.samples)
         assert mc_nsamples < n, "mc_nsamples must be less than the number of samples"
         cls = []
@@ -162,6 +262,15 @@ class ResidualStat:
         return np.array(cls)
     
     def bootstrap(self,mc_nsamples,b_nsamples,method='position'):
+        """
+        Returns the residual angular power spectrum using bootstraping
+
+        Parameters:
+        ----------
+        mc_nsamples: int - number of Monte Carlo samples
+        b_nsamples: int - number of bootstrap samples
+        method: str - method to use for bootstraping
+        """
         if method == 'position':
             return self.bootstrap_position(mc_nsamples,b_nsamples)
         elif method == 'pixel':
@@ -172,6 +281,14 @@ class ResidualStat:
 
     
     def plot_cls(self,cls=None,nsamples=None):
+        """
+        Plots the residual angular power spectrum
+
+        Parameters:
+        ----------
+        cls: array - residual angular power spectrum
+        nsamples: int - number of samples
+        """
         if cls is None:
             assert nsamples is not None, "nsamples must be specified or cls must be provided"
             cls = self.bootstrap_chain(nsamples)
@@ -182,6 +299,19 @@ class ResidualStat:
 
 
 class ResidualComp:
+    """
+    ResidualComp is a class that takes a dictionary of cosmological models
+    and their parameters, and runs the bootstraping analysis on each model 
+    using the specified method. It provides a method to plot the angular 
+    power spectrum of the residuals for each model.
+
+    Attributes:
+    ----------
+    dict: dict - dictionary of cosmological models, their parameters, and chain files
+    method: str - method to use for bootstraping
+    mc_nsamples: int - number of Monte Carlo samples
+    b_nsamples: int - number of bootstrap samples
+    """
 
     def __init__(self,dict,method,mc_nsamples=100,b_nsamples=100):
         self.models = list(dict.keys())
@@ -196,6 +326,9 @@ class ResidualComp:
                                                  dict[model]['datafile'])
 
     def run_bootstraping(self):
+        """
+        Runs bootstraping on each model
+        """
         for model in self.models:
             print(f'Running bootstraping on {self.method} for model: {model}')
             self.results[model] = self.residuals[model].bootstrap(self.mc_nsamples,self.b_nsamples,self.method)
