@@ -27,9 +27,11 @@ class ResidualStat:
     parameters: dict - cosmological parameters
     chainfile: str - path to the chain file
     data: str - data to use
+    zmin: float - minimum redshift
+    zmax: float - maximum redshift
     """
 
-    def __init__(self, model,parameters,chainfile,data='Pantheon_plus'):
+    def __init__(self, model,parameters,chainfile,data='Pantheon_plus',zmin=None,zmax=None):
 
         self.model = Cosmology(model,parameters)
         self.sample = emcee.backends.HDFBackend(chainfile)
@@ -44,6 +46,26 @@ class ResidualStat:
         self.NSIDE = 16
         self.npix = hp.nside2npix(self.NSIDE)
         self.lmax = 3*self.NSIDE - 1
+        
+        if zmin is not None:
+            mask = (self.zcmb >= zmin)
+            self.ra = self.ra[mask]
+            self.dec = self.dec[mask]
+            self.zcmb = self.zcmb[mask]
+            self.mbs = self.mbs[mask]
+            self.mbs_err = self.mbs_err[mask]
+            self.zhel = self.zhel[mask]
+
+
+        if zmax is not None:
+            mask = (self.zcmb <= zmax)
+            self.ra = self.ra[mask]
+            self.dec = self.dec[mask]
+            self.zcmb = self.zcmb[mask]
+            self.mbs = self.mbs[mask]
+            self.mbs_err = self.mbs_err[mask]
+            self.zhel = self.zhel[mask]
+        
     
     @property
     def resolution(self):
