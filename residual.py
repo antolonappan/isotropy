@@ -238,7 +238,7 @@ class ResidualStat:
         cls = []
         for i in range(nsamples):
             cls.append(self.get_residual_cls(bootstrap=True))
-        return np.array(cls).mean(axis=0)
+        return np.array(cls)
     
     def bootstrap_position(self,mc_nsamples,b_nsamples):
         """
@@ -254,7 +254,7 @@ class ResidualStat:
         cls = []
         for sample in self.random_nsamples(mc_nsamples):
             cls.append(self.get_residual_cls_bootstrap(b_nsamples))
-        return np.array(cls)
+        return np.vstack(cls)
     
     def bootstrap_pixel(self,mc_nsamples,b_nsamples):
         """
@@ -280,8 +280,8 @@ class ResidualStat:
                 sn_shuffled[res_masked_indexes] = sn_[shuffled_indexes]
                 cl_arri_shuffled = hp.anafast(sn_shuffled,lmax=self.lmax,use_weights=True)
                 cls_.append(cl_arri_shuffled)
-            cls.append(np.array(cls_).mean(axis=0))
-        return np.array(cls)
+            cls.append(np.array(cls_))
+        return np.vstack(cls)
     
     def bootstrap(self,mc_nsamples,b_nsamples,method='position'):
         """
@@ -356,8 +356,11 @@ class ResidualComp:
             self.results[model] = self.residuals[model].bootstrap(self.mc_nsamples,self.b_nsamples,self.method)
     
     def plot(self):
+        l = np.arange(len(self.results[self.models[0]].mean(axis=0)))
         for model in self.models:
-            plt.plot(self.results[model].mean(axis=0)[1:],label=model)
+            plt.errorbar(l[1:],100*self.results[model].mean(axis=0)[1:],yerr=self.results[model].std(axis=0)[1:]*100 ,marker='o',label=model)
         plt.legend()
         plt.title(f'{self.method} bootstraping')
-        plt.semilogy()
+        plt.xlabel('l')
+        plt.ylabel(r"$100 \times C_l$")
+        #plt.semilogy()
