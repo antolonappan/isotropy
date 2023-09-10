@@ -31,12 +31,20 @@ class ResidualStat:
     zmax: float - maximum redshift
     """
 
-    def __init__(self, model,parameters,chainfile,data='Pantheon_plus',zmin=None,zmax=None):
+    def __init__(self, model,parameters,chainfile,data='Pantheon_plus',zmin=None,zmax=None, residualfile=None):
 
         self.model = Cosmology(model,parameters)
-        self.sample = emcee.backends.HDFBackend(chainfile)
-        self.samples = self.sample.get_chain(discard=50, flat=True)
-        self.sample_median = np.median(self.samples, axis=0)
+        if chainfile is not None:
+            self.sample = emcee.backends.HDFBackend(chainfile)
+            self.samples = self.sample.get_chain(discard=50, flat=True)
+            self.sample_median = np.median(self.samples, axis=0)
+            self.residuals = None
+        elif residualfile is not None:
+            self.residuals = np.loadtxt(residualfile)
+        else:
+            raise ValueError("Either chainfile or residualfile must be provided")
+
+
         db = database.Data(data)
         self.ra, self.dec = db.get_pantheon_plus(position=True)
         self.zcmb,self.mbs,mbs_cov = db.get_pantheon_plus()
@@ -46,6 +54,8 @@ class ResidualStat:
         self.NSIDE = 16
         self.npix = hp.nside2npix(self.NSIDE)
         self.lmax = 3*self.NSIDE - 1
+
+
         
         if zmin is not None:
             mask = (self.zcmb >= zmin)
@@ -72,7 +82,7 @@ class ResidualStat:
         """
         Returns the resolution of the map in degrees
         """
-        return hp.nside2resol(NSIDE, arcmin=True) / 60 
+        return hp.nside2resol(self.NSIDE, arcmin=True) / 60 
         
     def plot_SN(self):
         """
@@ -110,7 +120,7 @@ class ResidualStat:
         index = np.array([0.]*self.npix)
         return arr,index
 
-    def get_residual(self,theory):
+    def get_residual(self,theory = None):
         """
         Returns the residual of the fit
 
@@ -118,16 +128,25 @@ class ResidualStat:
         ----------
         theory: array - array of the distance modulus of the supernovae
         """
-        return (self.mbs - theory)/self.mbs_err
+        if self.residuals is not None:
+            idx = np.random.randint(0, len(self.residuals), 1)
+            return self.residuals[:, idx]
+        else:
+            return (self.mbs - theory)/self.mbs_err
     
     def plot_residual_hist(self,param=None):
         """
         Plots the residual histogram
         """
-        if param is None:
-            param = self.sample_median
-        theory = self.get_theory(param)
-        ri = self.get_residual(theory)
+
+        if self.residuals is not None:
+            ri = self.residuals
+        else:
+            if param is None:
+                param = self.sample_median
+            theory = self.get_theory(param)
+            ri = self.get_residual(theory)
+
         plt.hist(ri,bins=30)
         plt.xlabel('Residual')
         plt.ylabel('Counts')
@@ -135,7 +154,7 @@ class ResidualStat:
         plt.show()
 
     
-    def get_residual_arr_ind(self,theory,bootstrap=False):
+    def get_residual_arr_ind(self,theory=None,bootstrap=False):
         """
         Returns the residual array and index
 
@@ -238,7 +257,8 @@ class ResidualStat:
         cls = []
         for i in range(nsamples):
             cls.append(self.get_residual_cls(bootstrap=True))
-        return np.array(cls).mean(axis=0)
+        
+        return cls
     
     def bootstrap_position(self,mc_nsamples,b_nsamples):
         """
@@ -249,12 +269,26 @@ class ResidualStat:
         mc_nsamples: int - number of Monte Carlo samples
         b_nsamples: int - number of bootstrap samples
         """
+
+        if self.residuals is not None:
+            n = len(self.residuals)
+            if mc_nsamples > n:
+                raise ValueError("mc_nsamples must be less than the number of available samples")
+
         n = len(self.samples)
-        assert mc_nsamples < n, "mc_nsamples must be less than the number of samples"
+        assert mc_nsamples < n, "mc_nsamples must be less than the number of b_nsamples"
         cls = []
         for sample in self.random_nsamples(mc_nsamples):
-            cls.append(self.get_residual_cls_bootstrap(b_nsamples))
-        return np.array(cls)
+            if b_nsamples > 0:
+                cls.append(self.get_residual_cls_bootstrap(b_nsamples))
+            else:
+                # bootstraping is not performed 
+                cls.append(self.get_residual_cls(sample,bootstrap=False))
+                
+        if b_nsamples > 0:
+            return np.vstack((np.array(cls)))
+        else:
+            return np.array(cls)
     
     def bootstrap_pixel(self,mc_nsamples,b_nsamples):
         """
@@ -339,9 +373,14 @@ class ResidualComp:
         self.models = list(dict.keys())
         self.mc_nsamples = mc_nsamples
         self.b_nsamples = b_nsamples
+        if self.b_nsamples == 0:
+            self.bootstrap = False
+        else:
+            self.bootstrap = True
         self.method = method
         self.residuals = {}
         self.results = {}
+        self.results_percentiles = {}
         for model in self.models:
             self.residuals[model] = ResidualStat(model,
                                                  dict[model]['params'],
@@ -354,10 +393,65 @@ class ResidualComp:
         for model in self.models:
             print(f'Running bootstraping on {self.method} for model: {model}')
             self.results[model] = self.residuals[model].bootstrap(self.mc_nsamples,self.b_nsamples,self.method)
-    
-    def plot(self):
+
+    def run_mcsampling(self):
+        """
+        Runs Monte Carlo sampling on each model
+        """
         for model in self.models:
-            plt.plot(self.results[model].mean(axis=0)[1:],label=model)
+            print(f'Running Monte Carlo sampling on {self.method} for model: {model}')
+            self.results[model] = self.residuals[model].bootstrap(self.mc_nsamples,0,self.method)
+
+    def compute_percentiles(self,percentiles=[2.5, 50, 97.5]):
+        """
+        Computes the percentiles of the residual angular power spectrum
+
+        Parameters:
+        ----------
+        percentiles: array - percentiles to compute
+        """
+        
+        for model in self.models:
+            self.results_percentiles[model] = np.percentile(self.results[model],percentiles,axis=0)
+
+            
+    
+    def plot(self, model = None, rescale = 1.0, plot_bs = True):
+        # if model is None:
+        #     model_to_plot = self.models
+        # else:
+        #     model_to_plot = [model]
+
+        model_to_plot = self.models if model is None else [model]
+        self.compute_percentiles()
+        for model in model_to_plot:
+            if plot_bs:
+                # plot the percentiles form l =1 to lmax
+                ls = np.arange(len(self.results_percentiles[model][0]))
+                plt.fill_between(ls[1:],
+                                 self.results_percentiles[model][0][1:]*rescale,
+                                 self.results_percentiles[model][2][1:]*rescale,
+                                 alpha=0.5, label=model+' 16-84%')
+                # plot the mean
+                plt.plot(ls[1:], self.results_percentiles[model][1][1:]*rescale, label=model+' mean')
+            else:
+                # plot the mean and std 
+                mean = self.results_percentiles[model][1]
+                low_err = (self.results_percentiles[model][1] - self.results_percentiles[model][0])*rescale
+                high_err = (self.results_percentiles[model][2] - self.results_percentiles[model][1])*rescale
+
+                plt.errorbar(np.arange(len(mean))[1:],mean[1:]*rescale,yerr=[low_err[1:], high_err[1:]],label=model, fmt = 's',capsize=1.0, alpha = 0.5, markersize = 1.0)
+
+                
+        plt.xlim(0, 50.0)
+        plt.grid(axis='both', linestyle='--'    )
+        plt.xlabel(r'$l$')
+        if rescale == 1.0:
+            plt.ylabel(fr'$C_l$')
+        else:
+            plt.ylabel(f'{rescale} x C_l')  
         plt.legend()
+        
         plt.title(f'{self.method} bootstraping')
-        plt.semilogy()
+        # plt.show()
+        
