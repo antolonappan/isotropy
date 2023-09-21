@@ -5,8 +5,9 @@ import healpy as hp
 import numpy as np
 import emcee
 import warnings
+import pickle as pl
 from tqdm import tqdm
-
+import os
 import sys 
 sys.path.append('../marcia/')
 from marcia import database
@@ -227,7 +228,20 @@ class ResidualStat:
                 del (samples,seen)
                 break
     
-    def get_residual_cls_bootstrap(self,nsamples):
+    def get_residual_cls_mc(self,nsamples,param=None):
+        """
+        Performs Monte Carlo sampling on the residual angular power spectrum
+
+        Parameters:
+        ----------
+        nsamples: int - number of samples
+        """
+        cls = []
+        for sample in self.random_nsamples(nsamples):
+            cls.append(self.get_residual_cls(sample))
+        return np.array(cls)
+    
+    def get_residual_cls_bootstrap(self,nsamples,param=None):
         """
         Performs bootstraping on the residual angular power spectrum
 
@@ -237,7 +251,7 @@ class ResidualStat:
         """
         cls = []
         for i in range(nsamples):
-            cls.append(self.get_residual_cls(bootstrap=True))
+            cls.append(self.get_residual_cls(param,bootstrap=True))
         return np.array(cls)
     
     def bootstrap_position(self,mc_nsamples,b_nsamples):
@@ -253,7 +267,7 @@ class ResidualStat:
         assert mc_nsamples < n, "mc_nsamples must be less than the number of samples"
         cls = []
         for sample in self.random_nsamples(mc_nsamples):
-            cls.append(self.get_residual_cls_bootstrap(b_nsamples))
+            cls.append(self.get_residual_cls_bootstrap(b_nsamples,sample))
         return np.vstack(cls)
     
     def bootstrap_pixel(self,mc_nsamples,b_nsamples):
@@ -363,4 +377,15 @@ class ResidualComp:
         plt.title(f'{self.method} bootstraping')
         plt.xlabel('l')
         plt.ylabel(r"$100 \times C_l$")
+        plt.xlim(0,30)
         #plt.semilogy()
+    
+    def to_cache(self,filename,overwrite=False):
+        """
+        Saves the results to a pickle file
+
+        Parameters:
+        ----------
+        filename: str - name of the file
+        """
+        pass
