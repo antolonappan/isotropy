@@ -13,6 +13,8 @@ sys.path.append('../marcia/')
 from marcia import database
 from marcia import Cosmology
 
+
+
 class ResidualStat:
     """
     ResidualStat is a class that computes the residuals of a cosmological model fit
@@ -39,9 +41,16 @@ class ResidualStat:
         self.samples = self.sample.get_chain(discard=50, flat=True)
         self.sample_median = np.median(self.samples, axis=0)
         db = database.Data(data)
-        self.ra, self.dec = db.get_pantheon_plus(position=True)
-        self.zcmb,self.mbs,mbs_cov = db.get_pantheon_plus()
-        self.zhel = db.get_pantheon_plus(Zhel=True)
+        if data == 'Pantheon_plus':
+            self.SNra, self.SNdec = db.get_pantheon_plus(position=True)
+            self.zcmb,self.mbs,mbs_cov = db.get_pantheon_plus()
+            self.zhel = db.get_pantheon_plus(Zhel=True)
+        elif data == 'Pantheon_old':
+            self.SNra, self.SNdec = db.get_pantheon_old(position=True)
+            self.zcmb,self.mbs,mbs_cov = db.get_pantheon_old()
+            self.zhel = db.get_pantheon_old(Zhel=True) 
+
+        self.Qz,_,_,_,_,self.DM, self.dDM, self.Qra, self.Qdec = db.get_QSO_data()
         self.mbs_err = np.sqrt(np.diag(mbs_cov))
 
         self.NSIDE = 16
@@ -50,22 +59,35 @@ class ResidualStat:
         
         if zmin is not None:
             mask = (self.zcmb >= zmin)
-            self.ra = self.ra[mask]
-            self.dec = self.dec[mask]
+            self.ra = self.SNra[mask]
+            self.dec = self.SNdec[mask]
             self.zcmb = self.zcmb[mask]
             self.mbs = self.mbs[mask]
             self.mbs_err = self.mbs_err[mask]
             self.zhel = self.zhel[mask]
+            maskq = (self.Qz >= zmin)
+            self.Qra = self.Qra[maskq]
+            self.Qdec = self.Qdec[maskq]
+            self.Qz = self.Qz[maskq]
+            self.DM = self.DM[maskq]
+            self.dDM = self.dDM[maskq]
+
 
 
         if zmax is not None:
             mask = (self.zcmb <= zmax)
-            self.ra = self.ra[mask]
-            self.dec = self.dec[mask]
+            self.ra = self.SNra[mask]
+            self.dec = self.SNdec[mask]
             self.zcmb = self.zcmb[mask]
             self.mbs = self.mbs[mask]
             self.mbs_err = self.mbs_err[mask]
             self.zhel = self.zhel[mask]
+            maskq = (self.Qz <= zmax)
+            self.Qra = self.Qra[maskq]
+            self.Qdec = self.Qdec[maskq]
+            self.Qz = self.Qz[maskq]
+            self.DM = self.DM[maskq]
+            self.dDM = self.dDM[maskq]
         
     
     @property
@@ -73,13 +95,18 @@ class ResidualStat:
         """
         Returns the resolution of the map in degrees
         """
-        return hp.nside2resol(NSIDE, arcmin=True) / 60 
+        return hp.nside2resol(self.NSIDE, arcmin=True) / 60 
         
-    def plot_SN(self):
+    def plot_dist(self,which='SN'):
         """
         Plots the positions of the supernovae in galactic coordinates
         """
-        c = SkyCoord(ra = self.ra*u.degree,dec = self.dec*u.degree,frame = 'icrs')
+        if which == 'SN':
+            c = SkyCoord(ra = self.SNra*u.degree,dec = self.SNdec*u.degree,frame = 'icrs')
+            col = self.zcmb
+        elif which == 'QSO':
+            c = SkyCoord(ra = self.Qra*u.degree,dec = self.Qdec*u.degree,frame = 'icrs')
+            col = self.Qz
 
         ra_rad = c.ra.radian
         ra_rad[ra_rad > np.pi] -= 2. * np.pi
@@ -92,15 +119,19 @@ class ResidualStat:
         fig = plt.figure(figsize=(10,6))
         ax = fig.add_subplot(1,1,1,projection="aitoff", aspect='equal')
         plt.grid(True)
-        points = plt.scatter(-1.*l_rad, b_rad, marker = 'o',alpha = 0.8, s = 20,c=self.zcmb,cmap=plt.cm.RdBu_r)
+        points = plt.scatter(-1.*l_rad, b_rad, marker = 'o',alpha = 0.8, s = 20,c=col,cmap=plt.cm.RdBu_r)
         plt.colorbar(points,orientation="vertical", pad=0.02, label = 'Redshift')
         plt.title("SN Ia Positions in galactic Coordinates", y=1.08)
+
     
-    def get_m(self):
+    def get_m(self,which):
         """
         Returns the pixel index of the supernovae
         """
-        m = hp.ang2pix(nside=self.NSIDE,phi=self.dec ,theta=self.ra, lonlat=True)
+        if which == 'SN':
+            m = hp.ang2pix(nside=self.NSIDE,phi=self.SNdec ,theta=self.SNra, lonlat=True)
+        elif which == 'QSO':
+            m = hp.ang2pix(nside=self.NSIDE,phi=self.Qdec ,theta=self.Qra, lonlat=True)
         return m.tolist()
     
     def get_mask(self):
@@ -111,7 +142,7 @@ class ResidualStat:
         index = np.array([0.]*self.npix)
         return arr,index
 
-    def get_residual(self,theory):
+    def get_residual(self,theory,which='SN'):
         """
         Returns the residual of the fit
 
@@ -119,16 +150,20 @@ class ResidualStat:
         ----------
         theory: array - array of the distance modulus of the supernovae
         """
-        return (self.mbs - theory)/self.mbs_err
+        if which == 'SN':
+            return (self.mbs - theory)/self.mbs_err
+        elif which == 'QSO':
+            return (self.DM - theory)/self.dDM
+        
     
-    def plot_residual_hist(self,param=None):
+    def plot_residual_hist(self,which='SN',param=None):
         """
         Plots the residual histogram
         """
         if param is None:
             param = self.sample_median
-        theory = self.get_theory(param)
-        ri = self.get_residual(theory)
+        theory = self.get_theory(which,param)
+        ri = self.get_residual(theory,which)
         plt.hist(ri,bins=30)
         plt.xlabel('Residual')
         plt.ylabel('Counts')
@@ -136,7 +171,7 @@ class ResidualStat:
         plt.show()
 
     
-    def get_residual_arr_ind(self,theory,bootstrap=False):
+    def get_residual_arr_ind(self,theory,which='SN',bootstrap=False):
         """
         Returns the residual array and index
 
@@ -145,19 +180,24 @@ class ResidualStat:
         theory: array - array of the distance modulus of the supernovae
         bootstrap: bool - if True, the residual array is shuffled
         """
-        m = self.get_m()
+        m = self.get_m(which)
         arr_,ind_ = self.get_mask()
         arr = arr_.copy()
         ind = ind_.copy()
-        ri = self.get_residual(theory).copy()
+        ri = self.get_residual(theory,which).copy()
         if bootstrap:
             ri = np.random.permutation(ri)
-        for i in range(len(self.zcmb)):
+        
+        if which == 'SN':
+            z = self.zcmb
+        elif which == 'QSO':
+            z = self.Qz
+        for i in range(len(z)):
             arr[m[i]] += ri[i]
             ind[m[i]] += 1.
         return arr,ind
     
-    def get_theory(self,param=None):
+    def get_theory(self,which='SN',param=None):
         """
         Returns the distance modulus of the supernovae
 
@@ -167,10 +207,14 @@ class ResidualStat:
         """
         if param is None:
             param = self.sample_median
-        theory = self.model.distance_modulus(param, self.zcmb, self.zhel)
-        return theory
+        if which == 'SN':
+            return self.model.distance_modulus(param, self.zcmb, self.zhel)
+        elif which == 'QSO':
+            return self.model.distance_modulus(param, self.Qz, self.Qz)
+        
     
-    def get_residual_map(self,param=None,bootstrap=False):
+    
+    def get_residual_map(self,which='SN',param=None,bootstrap=False):
         """
         Returns the residual map
 
@@ -181,15 +225,15 @@ class ResidualStat:
         """
         if param is None:
             param = self.sample_median
-        theory = self.get_theory(param)
-        arr,index = self.get_residual_arr_ind(theory,bootstrap=bootstrap)
+        theory = self.get_theory(which,param)
+        arr,index = self.get_residual_arr_ind(theory,which,bootstrap=bootstrap)
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            arri = np.nan_to_num(arr/index)
+            arri =  np.nan_to_num(arr)#/index)
         arri = hp.ma(arri, badval=0, copy=True)
         return arri
     
-    def get_residual_cls(self,param=None,bootstrap=False):
+    def get_residual_cls(self,which='SN',param=None,bootstrap=False):
         """
         Returns the residual angular power spectrum
         
@@ -200,7 +244,7 @@ class ResidualStat:
         """
         if param is None:
             param = self.sample_median
-        sn_map = self.get_residual_map(param,bootstrap=bootstrap)
+        sn_map = self.get_residual_map(which,param,bootstrap=bootstrap)
         #sn_map = hp.smoothing(sn_map, fwhm=np.radians(.5))
         cl = hp.anafast(sn_map, lmax=self.lmax,use_weights=True)
         return cl
@@ -228,7 +272,7 @@ class ResidualStat:
                 del (samples,seen)
                 break
     
-    def get_residual_cls_mc(self,nsamples,param=None):
+    def get_residual_cls_mc(self,nsamples,which='SN',param=None):
         """
         Performs Monte Carlo sampling on the residual angular power spectrum
 
@@ -238,7 +282,7 @@ class ResidualStat:
         """
         cls = []
         for sample in self.random_nsamples(nsamples):
-            cls.append(self.get_residual_cls(sample))
+            cls.append(self.get_residual_cls(which,sample))
         return np.array(cls)
     
     def get_residual_cls_bootstrap(self,nsamples,param=None):
